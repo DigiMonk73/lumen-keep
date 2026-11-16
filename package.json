@@ -1,0 +1,15 @@
+{
+  "name": "lumen-keep",
+  "version": "1.0.0",
+  "description": "A neon-lit fantasy tower defense in a single HTML file.",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "build": "sh build.sh",
+    "test": "node tools/e2e.js",
+    "balance": "node tools/balance.js"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
