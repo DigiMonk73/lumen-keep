@@ -400,15 +400,19 @@ function recomputeBuffs() {
     refreshTower(t);
   }
 }
-function buildTower(type, c, r) {
+function makeTower(type, c, r) {
   const def = TOWERS[type];
-  if (!canBuild(c, r) || G.gold < def.cost) return null;
-  const t = {
+  return {
     id: G.uid++, type, def, c, r, x: (c + 0.5) * T, y: (r + 0.5) * T,
     level: 0, branch: -1, spent: def.cost, cd: 0.3, ang: -Math.PI / 2, mode: 'first',
     disabledT: 0, kills: 0, dealt: 0, fresh: true, buff: { dmg: 1, rate: 1, range: 1 },
     recoil: 0, flash: 0, born: 0, firing: 0, tick: 0, target: null, stats: null, range: 0, color: def.color, attack: def.attack,
   };
+}
+function buildTower(type, c, r) {
+  const def = TOWERS[type];
+  if (!canBuild(c, r) || G.gold < def.cost) return null;
+  const t = makeTower(type, c, r);
   G.gold -= def.cost;
   G.stats.spent += def.cost; G.stats.built++;
   G.towers.push(t);
@@ -891,4 +895,69 @@ function update(dt) {
     sfx('victory');
     emit('end', true);
   }
+}
+
+// ---------- Battle save ----------
+// A battle in progress as plain data, so it can be stored and picked up later.
+// Links between objects (an enemy's definition, its road, the tower that set it
+// burning) are stored as names and ids and rebuilt on load. Shots in flight and
+// sparks are left out: they last under a second.
+const BATTLE_VERSION = 1;
+function plainFields(o, skip) {
+  const out = {};
+  for (const k in o) {
+    const v = o[k];
+    if ((typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') && !skip.includes(k)) out[k] = v;
+  }
+  return out;
+}
+function serializeBattle() {
+  if (!G || G.demo || G.over) return null;
+  return {
+    v: BATTLE_VERSION, mapId: G.map.id, diff: G.diffId, mode: G.mode,
+    gold: G.gold, lives: G.lives, wave: G.wave, nextWaveT: G.nextWaveT, time: G.time, uid: G.uid,
+    spells: { starfall: G.spells.starfall.cd, snare: G.spells.snare.cd },
+    stats: G.stats, seen: G.seen,
+    towers: G.towers.map(t => plainFields(t, ['x', 'y', 'range', 'color', 'attack'])),
+    enemies: G.enemies.filter(e => !e.dead).map(e => ({ ...plainFields(e, ['x', 'y', 'ang', 'seg', 'hit', 'dead']), burnSrc: e.burnSrc ? e.burnSrc.id : 0 })),
+    spawners: G.spawners,
+    zones: G.zones.map(z => ({ ...plainFields(z, []), src: z.src ? z.src.id : 0 })),
+  };
+}
+function validBattle(s) {
+  return !!s && s.v === BATTLE_VERSION && MAPS.some(m => m.id === s.mapId) && !!DIFFS[s.diff] &&
+    Array.isArray(s.towers) && Array.isArray(s.enemies) && Array.isArray(s.spawners);
+}
+// Rebuilds G from saved data. Returns false, leaving G unusable, if the data is bad.
+function restoreBattle(s) {
+  if (!validBattle(s)) return false;
+  newGame(s.mapId, s.diff, s.mode);
+  const byId = new Map();
+  for (const o of s.towers) {
+    const def = TOWERS[o.type];
+    if (!def || !canBuild(o.c, o.r) || !def.levels[o.level] || !(o.branch >= -1 && o.branch < def.branches.length)) continue;
+    const t = Object.assign(makeTower(o.type, o.c, o.r), o, { target: null });
+    G.towers.push(t);
+    G.towerAt[t.r * COLS + t.c] = t;
+    byId.set(t.id, t);
+  }
+  recomputeBuffs();
+  for (const o of s.enemies) {
+    const def = ENEMIES[o.type], p = G.paths[o.pi];
+    if (!def || !p || !(o.hp > 0)) continue;
+    const e = Object.assign({}, o, { def, p, burnSrc: byId.get(o.burnSrc) || null, seg: findSeg(p, o.d), x: 0, y: 0, ang: 0, hit: 0, dead: false });
+    placeEnemy(e);
+    G.enemies.push(e);
+    if (e.boss) G.bosses.push(e);
+  }
+  G.spawners = s.spawners.map(sp => ({ ...sp, groups: sp.groups.map(g => ({ ...g })) }));
+  G.zones = (s.zones || []).map(z => ({ ...z, src: byId.get(z.src) || null }));
+  Object.assign(G.stats, s.stats || {});
+  Object.assign(G, {
+    gold: s.gold, lives: s.lives, wave: s.wave, nextWaveT: s.nextWaveT, time: s.time,
+    uid: Math.max(G.uid, s.uid || 0), seen: s.seen || {},
+  });
+  G.spells.starfall.cd = (s.spells && s.spells.starfall) || 0;
+  G.spells.snare.cd = (s.spells && s.spells.snare) || 0;
+  return true;
 }

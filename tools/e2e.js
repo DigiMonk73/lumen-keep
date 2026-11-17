@@ -90,6 +90,74 @@ const assert = (c, m) => { if (!c) { console.log('FAIL:', m); process.exitCode =
   await p.click('#btnPlay');
   const locked = await p.evaluate(() => [...document.querySelectorAll('.map-card')].map(c => c.classList.contains('locked')));
   assert(!locked[1] && locked[2], 'after reload, Twin Fords unlocked and Serpent\'s Coil locked');
+  // ---------- Mid-battle save ----------
+  const KEY = 'lumen-keep.battle.v1';
+  const diff = (a, b, path = '') => {
+    if (typeof a !== typeof b) return path + ': ' + JSON.stringify(a) + ' vs ' + JSON.stringify(b);
+    if (a && typeof a === 'object') {
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      for (const k of keys) { const d = diff(a[k], b[k], path + '.' + k); if (d) return d; }
+      return null;
+    }
+    return a === b ? null : path + ': ' + JSON.stringify(a) + ' vs ' + JSON.stringify(b);
+  };
+  assert(!!(await p.evaluate(k => localStorage.getItem(k), KEY)), 'the unfinished Twin Fords battle above was saved');
+  await p.evaluate(k => localStorage.removeItem(k), KEY);
+  await p.reload(); await p.waitForTimeout(600);
+  assert(!(await p.isVisible('#btnContinue')), 'no Continue button without a saved battle');
+  await p.evaluate(() => {
+    const L = window.__LK; L.startBattle('vale', 'knight', 'campaign');
+    const G = L.G; G.gold = 4000;
+    const a = L.buildTower('archer', 3, 3); L.upgradeTower(a); L.upgradeTower(a); L.upgradeTower(a, 1); a.mode = 'strong';
+    const f = L.buildTower('flame', 8, 6); L.upgradeTower(f); L.upgradeTower(f); L.upgradeTower(f, 1);
+    L.buildTower('frost', 10, 4); L.buildTower('beacon', 6, 6); L.buildTower('bombard', 7, 7);
+    G.wave = 9; L.startNextWave();
+    for (let i = 0; i < 60 * 7; i++) L.update(1 / 60);
+    L.castSpell('snare', 4.5 * 48, 5 * 48);
+    L.UIState.speed = 2;
+    L.UIState.paused = true;   // freeze the field so foes are still on it when it saves
+  });
+  await p.waitForTimeout(2600);
+  assert(!!(await p.evaluate(k => localStorage.getItem(k), KEY)), 'battle autosaves while playing');
+  await p.reload();          // closing the page also saves on the way out
+  await p.waitForTimeout(700);
+  const stored = JSON.parse(await p.evaluate(k => localStorage.getItem(k), KEY));
+  assert(stored.enemies.length > 0 && stored.towers.length === 5, `saved ${stored.towers.length} towers and ${stored.enemies.length} foes`);
+  const label = await p.textContent('#btnContinue');
+  assert(await p.isVisible('#btnContinue') && /Whisperwood Vale · wave/.test(label), 'title shows Continue: ' + label.trim());
+  await p.click('#btnContinue');
+  await p.waitForTimeout(300);
+  assert(await p.isVisible('#scrPause') && (await p.textContent('#pauseTitle')) === 'Welcome back', 'resumes paused behind a Welcome back screen');
+  const restored = JSON.parse(await p.evaluate(() => JSON.stringify(window.__LK.serializeBattle(), (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v))));
+  const expected = { ...stored }; delete expected.speed;
+  const d = diff(expected, restored);
+  assert(!d, 'restored battle matches the save exactly' + (d ? ' (first difference ' + d + ')' : ''));
+  assert(await p.evaluate(() => window.__LK.UIState.speed) === 2, 'game speed restored');
+  const t0 = await p.evaluate(() => window.__LK.G.time);
+  await p.click('#btnResume');
+  await p.evaluate(() => { for (let i = 0; i < 60 * 30; i++) window.__LK.update(1 / 60); });
+  await p.waitForTimeout(400);
+  assert(await p.evaluate(() => window.__LK.G.time) > t0 + 25, 'battle plays on after Resume');
+  // Leave battle keeps it resumable
+  await p.keyboard.press('Escape');
+  await p.click('#btnQuit');
+  await p.waitForTimeout(300);
+  assert(await p.isVisible('#btnContinue'), 'Leave battle keeps the save and shows Continue');
+  await p.click('#btnPlay');
+  assert(/Replaces your unfinished battle on Whisperwood Vale/.test(await p.textContent('#beginNote')), 'map screen warns that starting replaces it');
+  // Winning clears it
+  await p.click('#btnMapsBack');
+  await p.click('#btnContinue');
+  await p.click('#btnResume');
+  await p.evaluate(() => { const G = window.__LK.G; G.wave = G.waves; G.spawners = []; G.enemies = []; });
+  await p.waitForTimeout(1500);
+  assert(await p.evaluate(k => localStorage.getItem(k), KEY) === null, 'winning clears the battle save');
+  // Bad data is ignored, not crashed on
+  for (const junk of ['{{not json', '{"v":1,"mapId":"nowhere","diff":"knight","towers":[],"enemies":[],"spawners":[]}', '{"v":99}']) {
+    await p.evaluate(([k, v]) => localStorage.setItem(k, v), [KEY, junk]);
+    await p.reload(); await p.waitForTimeout(500);
+    assert(!(await p.isVisible('#btnContinue')), 'corrupt save ignored: ' + junk.slice(0, 24));
+  }
   console.log(errs.length ? 'ERRORS\n' + errs.join('\n') : 'no errors');
   await b.close();
 })();

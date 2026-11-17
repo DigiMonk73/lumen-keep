@@ -21,6 +21,25 @@ function loadSave() {
   } catch (e) { /* storage blocked: play without saving */ }
 }
 function writeSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(Save)); } catch (e) { /* ignore */ } }
+// The battle in progress is stored separately, so a broken battle save can
+// never cost the player their unlocked maps and stars.
+const BATTLE_KEY = 'lumen-keep.battle.v1';
+const roundNums = (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v);
+function saveBattle() {
+  if (!G || G.demo) return;
+  if (G.over) { clearBattle(); return; }
+  const data = serializeBattle();
+  if (!data) return;
+  data.speed = UIState.speed;
+  try { localStorage.setItem(BATTLE_KEY, JSON.stringify(data, roundNums)); } catch (e) { /* storage full or blocked */ }
+}
+function loadBattle() {
+  try {
+    const s = JSON.parse(localStorage.getItem(BATTLE_KEY) || 'null');
+    return validBattle(s) ? s : null;
+  } catch (e) { return null; }
+}
+function clearBattle() { try { localStorage.removeItem(BATTLE_KEY); } catch (e) { /* ignore */ } }
 const mapRec = id => (Save.maps[id] = Save.maps[id] || { stars: 0, legend: false, best: 0 });
 const mapUnlocked = i => i === 0 || (Save.maps[MAPS[i - 1].id] || {}).stars > 0;
 
@@ -35,6 +54,7 @@ function show(screen) {
   $('app').classList.toggle('on-title', !inGame);
   requestAnimationFrame(resizeCanvas);
   if (screen === 'maps') buildMapScreen();
+  if (screen === 'title') refreshContinue();
 }
 
 function toTitle() {
@@ -67,8 +87,29 @@ function startDemo() {
 // ---------- Starting a battle ----------
 function startBattle(mapId, diff, mode) {
   Sound.init();
+  clearBattle();
   UIState.mapId = mapId; UIState.diff = diff; UIState.mode = mode;
   newGame(mapId, diff, mode);
+  enterBattleUI();
+  tutorial('start');
+}
+
+// Picks up a saved battle, paused behind a welcome-back screen.
+function resumeBattle(s) {
+  Sound.init();
+  let ok = false;
+  try { ok = restoreBattle(s); } catch (e) { ok = false; }
+  if (!ok) { clearBattle(); toTitle(); return false; }
+  UIState.mapId = s.mapId; UIState.diff = s.diff; UIState.mode = s.mode;
+  enterBattleUI();
+  setSpeed(s.speed >= 1 && s.speed <= 3 ? s.speed : 1);
+  UIState.paused = true;
+  $('pauseTitle').textContent = 'Welcome back';
+  show('pause');
+  return true;
+}
+
+function enterBattleUI() {
   UIState.selected = null; UIState.placing = null; UIState.spell = null; UIState.pendingTouch = null;
   UIState.paused = false; $('paused-tag').hidden = true;
   hideInspect();
@@ -77,8 +118,8 @@ function startBattle(mapId, diff, mode) {
   $('bossbar').hidden = true;
   buildSide();
   show('game');
+  lastGold = -1; lastLives = -1;
   updateWaveButton(true);
-  tutorial('start');
 }
 
 // ---------- Sidebar ----------
@@ -375,6 +416,8 @@ $('btnMenu').addEventListener('click', () => openPause());
 
 function openPause() {
   if (!G || G.demo || G.over) return;
+  saveBattle();
+  $('pauseTitle').textContent = 'Paused';
   UIState.paused = true;
   show('pause');
 }
@@ -456,6 +499,7 @@ Hooks.intro = type => { if (!G.demo) showIntro(type); };
 Hooks.built = () => tutorial('built');
 Hooks.leak = () => {};
 Hooks.end = won => {
+  clearBattle();
   setTimeout(() => showEnd(won), won ? 900 : 1200);
 };
 
@@ -542,6 +586,9 @@ function buildMapScreen() {
 }
 function refreshOptions() {
   $('diffNote').textContent = DIFFS[UIState.diff].note;
+  const saved = loadBattle();
+  const savedMap = saved && MAPS.find(m => m.id === saved.mapId);
+  $('beginNote').textContent = saved ? `Replaces your unfinished battle on ${savedMap.name}, wave ${saved.wave}.` : '';
   const rec = Save.maps[UIState.mapId] || { stars: 0 };
   const endlessOk = rec.stars > 0;
   if (!endlessOk && UIState.mode === 'endless') UIState.mode = 'campaign';
@@ -574,12 +621,24 @@ $('modeSeg').addEventListener('click', ev => {
 $('btnBegin').addEventListener('click', () => startBattle(UIState.mapId, UIState.diff, UIState.mode));
 $('btnMapsBack').addEventListener('click', () => show('title'));
 $('btnPlay').addEventListener('click', () => { Sound.init(); show('maps'); });
+$('btnContinue').addEventListener('click', () => {
+  const s = loadBattle();
+  if (!s || !resumeBattle(s)) refreshContinue();
+});
+function refreshContinue() {
+  const s = loadBattle(), b = $('btnContinue');
+  b.hidden = !s;
+  $('btnPlay').classList.toggle('primary', !s);
+  if (!s) return;
+  const m = MAPS.find(x => x.id === s.mapId);
+  b.innerHTML = `Continue <small>${esc(m.name)} · wave ${s.wave}${s.mode === 'endless' ? ' · Endless' : ''}</small>`;
+}
 $('btnHelpTitle').addEventListener('click', () => { helpReturn = 'title'; buildBestiary(); show('help'); });
 $('btnHelpPause').addEventListener('click', () => { helpReturn = 'pause'; buildBestiary(); show('help'); });
 $('btnHelpBack').addEventListener('click', () => show(helpReturn));
 $('btnResume').addEventListener('click', resume);
 $('btnRestart').addEventListener('click', () => startBattle(G.map.id, UIState.diff, UIState.mode));
-$('btnQuit').addEventListener('click', () => { UIState.paused = false; startDemo(); show('maps'); });
+$('btnQuit').addEventListener('click', () => { saveBattle(); UIState.paused = false; startDemo(); show('title'); });
 
 function buildBestiary() {
   const el = $('bestiary');
@@ -697,6 +756,10 @@ document.addEventListener('pointerup', ev => {
   if (b && UIState.screen === 'game') b.blur();
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && G && !G.demo && UIState.screen === 'game' && !G.over) openPause();
+  if (!document.hidden) return;
+  saveBattle();
+  if (G && !G.demo && UIState.screen === 'game' && !G.over) openPause();
 });
+window.addEventListener('pagehide', saveBattle);
+window.addEventListener('beforeunload', saveBattle);
 window.addEventListener('resize', () => requestAnimationFrame(resizeCanvas));

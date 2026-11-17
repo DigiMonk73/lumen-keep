@@ -37,7 +37,12 @@ upright, the battlefield turns to fill the screen.
 - **Four maps:** a winding forest road, two roads meeting at a river bridge,
   a road that crosses itself, and a road that forks around a lake of fire.
 - **Three difficulties** (Squire, Knight, Legend), star ratings, and an
-  Endless mode for each map you have won. Progress is saved in the browser.
+  Endless mode for each map you have won.
+- **Saving.** Stars, unlocked maps and any battle in progress are saved in
+  the browser as you play. Close the page mid-battle and **Continue** on the
+  title screen brings it back exactly as you left it: every tower, every foe
+  on the road, gold, lives and the wave. Saves stay in the browser you play
+  in; another browser or a private window starts fresh.
 - **Two spells,** speed control, early-call gold bonus, a preview of the next
   wave, and per-tower targeting (first, last, strongest, closest).
 - Synthesized sound effects and an ambient score, made in the browser with
@@ -93,8 +98,8 @@ npm test
 npm run balance
 ```
 
-`npm test` plays through building, upgrading, spells, pausing, selling and
-winning a map with real clicks and keys. `npm run balance` has an automated
+`npm test` plays through building, upgrading, spells, pausing, selling,
+winning a map, and saving and resuming a battle, with real clicks and keys. `npm run balance` has an automated
 player run each map and reports how far it gets and how many lives it keeps,
 for tuning the numbers in `src/02-data.js`.
 

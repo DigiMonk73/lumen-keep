@@ -44,6 +44,7 @@
           <div class="rule"><i></i></div>
           <p class="tagline">Raise towers of arrow, spell, frost and flame along the rune-roads. Hold the keep until dawn.</p>
           <div class="menu">
+            <button class="btn primary" id="btnContinue" type="button" hidden>Continue</button>
             <button class="btn primary" id="btnPlay" type="button">Play</button>
             <button class="btn" id="btnHelpTitle" type="button">How to play</button>
           </div>
@@ -75,14 +76,17 @@
               </div>
               <span class="note" id="modeNote"></span>
             </div>
-            <button class="btn primary" id="btnBegin" type="button">Begin siege</button>
+            <div class="opt begin-opt">
+              <button class="btn primary" id="btnBegin" type="button">Begin siege</button>
+              <span class="note" id="beginNote"></span>
+            </div>
           </div>
         </div>
       </div>
 
       <div id="scrPause" class="screen" hidden>
         <div class="sheet narrow end-card">
-          <h2>Paused</h2>
+          <h2 id="pauseTitle">Paused</h2>
           <div class="menu">
             <button class="btn primary" id="btnResume" type="button">Resume</button>
             <button class="btn" id="btnRestart" type="button">Restart</button>
@@ -113,6 +117,7 @@
             <section><h3>Upgrade</h3><p>Click a tower to see its stats. Every tower has three levels, then a choice of two specialists. Selling returns 70% of what you spent, or all of it if no wave has started since you built it.</p></section>
             <section><h3>Waves</h3><p>Once a wave has fully arrived, the next starts in 20 seconds. Call it early for bonus gold. Clearing a wave pays a bounty too.</p></section>
             <section><h3>Armor, wards and flyers</h3><p>Armor blunts arrows and shells. Wards blunt magic. Fire ignores half of armor. Flyers can only be hit by Archer, Mage and Frost towers.</p></section>
+            <section><h3>Saving</h3><p>Your stars, unlocked maps and any unfinished battle are saved in this browser as you play. Close the page whenever you like: <b>Continue</b> on the title screen picks up right where you left off.</p></section>
             <section><h3>Spells</h3><p><b>Starfall</b> (<kbd>Q</kbd>) drops a star on an area. <b>Arcane Snare</b> (<kbd>W</kbd>) roots foes in place. Both recharge over time.</p></section>
             <section>
               <h3>Keys</h3>

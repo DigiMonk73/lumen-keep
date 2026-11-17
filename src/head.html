@@ -288,6 +288,7 @@ button:disabled { cursor: default; }
   box-shadow: 0 0 28px -6px rgba(255, 190, 70, 0.7);
 }
 .btn.small { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+.btn small { font-family: var(--font-body); font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; opacity: 0.8; }
 .btn.ghost { background: transparent; }
 
 /* Title */
@@ -337,7 +338,8 @@ button:disabled { cursor: default; }
 .opt { display: grid; gap: 6px; }
 .opt .lbl { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
 .opt .note { font-size: 13px; color: var(--muted); min-height: 1.4em; }
-.options .btn.primary { margin-left: auto; }
+.begin-opt { margin-left: auto; justify-items: end; text-align: right; }
+.begin-opt .note { max-width: 32ch; }
 
 /* End + pause */
 .end-card { display: grid; gap: 14px; justify-items: center; text-align: center; }
