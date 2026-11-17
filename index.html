@@ -292,6 +292,7 @@ button:disabled { cursor: default; }
   box-shadow: 0 0 28px -6px rgba(255, 190, 70, 0.7);
 }
 .btn.small { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+.btn small { font-family: var(--font-body); font-size: 13px; font-weight: 700; letter-spacing: 0; text-transform: none; opacity: 0.8; }
 .btn.ghost { background: transparent; }
 
 /* Title */
@@ -341,7 +342,8 @@ button:disabled { cursor: default; }
 .opt { display: grid; gap: 6px; }
 .opt .lbl { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); font-weight: 800; }
 .opt .note { font-size: 13px; color: var(--muted); min-height: 1.4em; }
-.options .btn.primary { margin-left: auto; }
+.begin-opt { margin-left: auto; justify-items: end; text-align: right; }
+.begin-opt .note { max-width: 32ch; }
 
 /* End + pause */
 .end-card { display: grid; gap: 14px; justify-items: center; text-align: center; }
@@ -480,6 +482,7 @@ kbd {
           <div class="rule"><i></i></div>
           <p class="tagline">Raise towers of arrow, spell, frost and flame along the rune-roads. Hold the keep until dawn.</p>
           <div class="menu">
+            <button class="btn primary" id="btnContinue" type="button" hidden>Continue</button>
             <button class="btn primary" id="btnPlay" type="button">Play</button>
             <button class="btn" id="btnHelpTitle" type="button">How to play</button>
           </div>
@@ -511,14 +514,17 @@ kbd {
               </div>
               <span class="note" id="modeNote"></span>
             </div>
-            <button class="btn primary" id="btnBegin" type="button">Begin siege</button>
+            <div class="opt begin-opt">
+              <button class="btn primary" id="btnBegin" type="button">Begin siege</button>
+              <span class="note" id="beginNote"></span>
+            </div>
           </div>
         </div>
       </div>
 
       <div id="scrPause" class="screen" hidden>
         <div class="sheet narrow end-card">
-          <h2>Paused</h2>
+          <h2 id="pauseTitle">Paused</h2>
           <div class="menu">
             <button class="btn primary" id="btnResume" type="button">Resume</button>
             <button class="btn" id="btnRestart" type="button">Restart</button>
@@ -549,6 +555,7 @@ kbd {
             <section><h3>Upgrade</h3><p>Click a tower to see its stats. Every tower has three levels, then a choice of two specialists. Selling returns 70% of what you spent, or all of it if no wave has started since you built it.</p></section>
             <section><h3>Waves</h3><p>Once a wave has fully arrived, the next starts in 20 seconds. Call it early for bonus gold. Clearing a wave pays a bounty too.</p></section>
             <section><h3>Armor, wards and flyers</h3><p>Armor blunts arrows and shells. Wards blunt magic. Fire ignores half of armor. Flyers can only be hit by Archer, Mage and Frost towers.</p></section>
+            <section><h3>Saving</h3><p>Your stars, unlocked maps and any unfinished battle are saved in this browser as you play. Close the page whenever you like: <b>Continue</b> on the title screen picks up right where you left off.</p></section>
             <section><h3>Spells</h3><p><b>Starfall</b> (<kbd>Q</kbd>) drops a star on an area. <b>Arcane Snare</b> (<kbd>W</kbd>) roots foes in place. Both recharge over time.</p></section>
             <section>
               <h3>Keys</h3>
@@ -1537,15 +1544,19 @@ function recomputeBuffs() {
     refreshTower(t);
   }
 }
-function buildTower(type, c, r) {
+function makeTower(type, c, r) {
   const def = TOWERS[type];
-  if (!canBuild(c, r) || G.gold < def.cost) return null;
-  const t = {
+  return {
     id: G.uid++, type, def, c, r, x: (c + 0.5) * T, y: (r + 0.5) * T,
     level: 0, branch: -1, spent: def.cost, cd: 0.3, ang: -Math.PI / 2, mode: 'first',
     disabledT: 0, kills: 0, dealt: 0, fresh: true, buff: { dmg: 1, rate: 1, range: 1 },
     recoil: 0, flash: 0, born: 0, firing: 0, tick: 0, target: null, stats: null, range: 0, color: def.color, attack: def.attack,
   };
+}
+function buildTower(type, c, r) {
+  const def = TOWERS[type];
+  if (!canBuild(c, r) || G.gold < def.cost) return null;
+  const t = makeTower(type, c, r);
   G.gold -= def.cost;
   G.stats.spent += def.cost; G.stats.built++;
   G.towers.push(t);
@@ -2028,6 +2039,71 @@ function update(dt) {
     sfx('victory');
     emit('end', true);
   }
+}
+
+// ---------- Battle save ----------
+// A battle in progress as plain data, so it can be stored and picked up later.
+// Links between objects (an enemy's definition, its road, the tower that set it
+// burning) are stored as names and ids and rebuilt on load. Shots in flight and
+// sparks are left out: they last under a second.
+const BATTLE_VERSION = 1;
+function plainFields(o, skip) {
+  const out = {};
+  for (const k in o) {
+    const v = o[k];
+    if ((typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') && !skip.includes(k)) out[k] = v;
+  }
+  return out;
+}
+function serializeBattle() {
+  if (!G || G.demo || G.over) return null;
+  return {
+    v: BATTLE_VERSION, mapId: G.map.id, diff: G.diffId, mode: G.mode,
+    gold: G.gold, lives: G.lives, wave: G.wave, nextWaveT: G.nextWaveT, time: G.time, uid: G.uid,
+    spells: { starfall: G.spells.starfall.cd, snare: G.spells.snare.cd },
+    stats: G.stats, seen: G.seen,
+    towers: G.towers.map(t => plainFields(t, ['x', 'y', 'range', 'color', 'attack'])),
+    enemies: G.enemies.filter(e => !e.dead).map(e => ({ ...plainFields(e, ['x', 'y', 'ang', 'seg', 'hit', 'dead']), burnSrc: e.burnSrc ? e.burnSrc.id : 0 })),
+    spawners: G.spawners,
+    zones: G.zones.map(z => ({ ...plainFields(z, []), src: z.src ? z.src.id : 0 })),
+  };
+}
+function validBattle(s) {
+  return !!s && s.v === BATTLE_VERSION && MAPS.some(m => m.id === s.mapId) && !!DIFFS[s.diff] &&
+    Array.isArray(s.towers) && Array.isArray(s.enemies) && Array.isArray(s.spawners);
+}
+// Rebuilds G from saved data. Returns false, leaving G unusable, if the data is bad.
+function restoreBattle(s) {
+  if (!validBattle(s)) return false;
+  newGame(s.mapId, s.diff, s.mode);
+  const byId = new Map();
+  for (const o of s.towers) {
+    const def = TOWERS[o.type];
+    if (!def || !canBuild(o.c, o.r) || !def.levels[o.level] || !(o.branch >= -1 && o.branch < def.branches.length)) continue;
+    const t = Object.assign(makeTower(o.type, o.c, o.r), o, { target: null });
+    G.towers.push(t);
+    G.towerAt[t.r * COLS + t.c] = t;
+    byId.set(t.id, t);
+  }
+  recomputeBuffs();
+  for (const o of s.enemies) {
+    const def = ENEMIES[o.type], p = G.paths[o.pi];
+    if (!def || !p || !(o.hp > 0)) continue;
+    const e = Object.assign({}, o, { def, p, burnSrc: byId.get(o.burnSrc) || null, seg: findSeg(p, o.d), x: 0, y: 0, ang: 0, hit: 0, dead: false });
+    placeEnemy(e);
+    G.enemies.push(e);
+    if (e.boss) G.bosses.push(e);
+  }
+  G.spawners = s.spawners.map(sp => ({ ...sp, groups: sp.groups.map(g => ({ ...g })) }));
+  G.zones = (s.zones || []).map(z => ({ ...z, src: byId.get(z.src) || null }));
+  Object.assign(G.stats, s.stats || {});
+  Object.assign(G, {
+    gold: s.gold, lives: s.lives, wave: s.wave, nextWaveT: s.nextWaveT, time: s.time,
+    uid: Math.max(G.uid, s.uid || 0), seen: s.seen || {},
+  });
+  G.spells.starfall.cd = (s.spells && s.spells.starfall) || 0;
+  G.spells.snare.cd = (s.spells && s.spells.snare) || 0;
+  return true;
 }
 // ===================================================================
 // RENDER: cached map background + per-frame neon entities
@@ -3215,6 +3291,25 @@ function loadSave() {
   } catch (e) { /* storage blocked: play without saving */ }
 }
 function writeSave() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(Save)); } catch (e) { /* ignore */ } }
+// The battle in progress is stored separately, so a broken battle save can
+// never cost the player their unlocked maps and stars.
+const BATTLE_KEY = 'lumen-keep.battle.v1';
+const roundNums = (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v);
+function saveBattle() {
+  if (!G || G.demo) return;
+  if (G.over) { clearBattle(); return; }
+  const data = serializeBattle();
+  if (!data) return;
+  data.speed = UIState.speed;
+  try { localStorage.setItem(BATTLE_KEY, JSON.stringify(data, roundNums)); } catch (e) { /* storage full or blocked */ }
+}
+function loadBattle() {
+  try {
+    const s = JSON.parse(localStorage.getItem(BATTLE_KEY) || 'null');
+    return validBattle(s) ? s : null;
+  } catch (e) { return null; }
+}
+function clearBattle() { try { localStorage.removeItem(BATTLE_KEY); } catch (e) { /* ignore */ } }
 const mapRec = id => (Save.maps[id] = Save.maps[id] || { stars: 0, legend: false, best: 0 });
 const mapUnlocked = i => i === 0 || (Save.maps[MAPS[i - 1].id] || {}).stars > 0;
 
@@ -3229,6 +3324,7 @@ function show(screen) {
   $('app').classList.toggle('on-title', !inGame);
   requestAnimationFrame(resizeCanvas);
   if (screen === 'maps') buildMapScreen();
+  if (screen === 'title') refreshContinue();
 }
 
 function toTitle() {
@@ -3261,8 +3357,29 @@ function startDemo() {
 // ---------- Starting a battle ----------
 function startBattle(mapId, diff, mode) {
   Sound.init();
+  clearBattle();
   UIState.mapId = mapId; UIState.diff = diff; UIState.mode = mode;
   newGame(mapId, diff, mode);
+  enterBattleUI();
+  tutorial('start');
+}
+
+// Picks up a saved battle, paused behind a welcome-back screen.
+function resumeBattle(s) {
+  Sound.init();
+  let ok = false;
+  try { ok = restoreBattle(s); } catch (e) { ok = false; }
+  if (!ok) { clearBattle(); toTitle(); return false; }
+  UIState.mapId = s.mapId; UIState.diff = s.diff; UIState.mode = s.mode;
+  enterBattleUI();
+  setSpeed(s.speed >= 1 && s.speed <= 3 ? s.speed : 1);
+  UIState.paused = true;
+  $('pauseTitle').textContent = 'Welcome back';
+  show('pause');
+  return true;
+}
+
+function enterBattleUI() {
   UIState.selected = null; UIState.placing = null; UIState.spell = null; UIState.pendingTouch = null;
   UIState.paused = false; $('paused-tag').hidden = true;
   hideInspect();
@@ -3271,8 +3388,8 @@ function startBattle(mapId, diff, mode) {
   $('bossbar').hidden = true;
   buildSide();
   show('game');
+  lastGold = -1; lastLives = -1;
   updateWaveButton(true);
-  tutorial('start');
 }
 
 // ---------- Sidebar ----------
@@ -3569,6 +3686,8 @@ $('btnMenu').addEventListener('click', () => openPause());
 
 function openPause() {
   if (!G || G.demo || G.over) return;
+  saveBattle();
+  $('pauseTitle').textContent = 'Paused';
   UIState.paused = true;
   show('pause');
 }
@@ -3650,6 +3769,7 @@ Hooks.intro = type => { if (!G.demo) showIntro(type); };
 Hooks.built = () => tutorial('built');
 Hooks.leak = () => {};
 Hooks.end = won => {
+  clearBattle();
   setTimeout(() => showEnd(won), won ? 900 : 1200);
 };
 
@@ -3736,6 +3856,9 @@ function buildMapScreen() {
 }
 function refreshOptions() {
   $('diffNote').textContent = DIFFS[UIState.diff].note;
+  const saved = loadBattle();
+  const savedMap = saved && MAPS.find(m => m.id === saved.mapId);
+  $('beginNote').textContent = saved ? `Replaces your unfinished battle on ${savedMap.name}, wave ${saved.wave}.` : '';
   const rec = Save.maps[UIState.mapId] || { stars: 0 };
   const endlessOk = rec.stars > 0;
   if (!endlessOk && UIState.mode === 'endless') UIState.mode = 'campaign';
@@ -3768,12 +3891,24 @@ $('modeSeg').addEventListener('click', ev => {
 $('btnBegin').addEventListener('click', () => startBattle(UIState.mapId, UIState.diff, UIState.mode));
 $('btnMapsBack').addEventListener('click', () => show('title'));
 $('btnPlay').addEventListener('click', () => { Sound.init(); show('maps'); });
+$('btnContinue').addEventListener('click', () => {
+  const s = loadBattle();
+  if (!s || !resumeBattle(s)) refreshContinue();
+});
+function refreshContinue() {
+  const s = loadBattle(), b = $('btnContinue');
+  b.hidden = !s;
+  $('btnPlay').classList.toggle('primary', !s);
+  if (!s) return;
+  const m = MAPS.find(x => x.id === s.mapId);
+  b.innerHTML = `Continue <small>${esc(m.name)} · wave ${s.wave}${s.mode === 'endless' ? ' · Endless' : ''}</small>`;
+}
 $('btnHelpTitle').addEventListener('click', () => { helpReturn = 'title'; buildBestiary(); show('help'); });
 $('btnHelpPause').addEventListener('click', () => { helpReturn = 'pause'; buildBestiary(); show('help'); });
 $('btnHelpBack').addEventListener('click', () => show(helpReturn));
 $('btnResume').addEventListener('click', resume);
 $('btnRestart').addEventListener('click', () => startBattle(G.map.id, UIState.diff, UIState.mode));
-$('btnQuit').addEventListener('click', () => { UIState.paused = false; startDemo(); show('maps'); });
+$('btnQuit').addEventListener('click', () => { saveBattle(); UIState.paused = false; startDemo(); show('title'); });
 
 function buildBestiary() {
   const el = $('bestiary');
@@ -3891,14 +4026,18 @@ document.addEventListener('pointerup', ev => {
   if (b && UIState.screen === 'game') b.blur();
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && G && !G.demo && UIState.screen === 'game' && !G.over) openPause();
+  if (!document.hidden) return;
+  saveBattle();
+  if (G && !G.demo && UIState.screen === 'game' && !G.over) openPause();
 });
+window.addEventListener('pagehide', saveBattle);
+window.addEventListener('beforeunload', saveBattle);
 window.addEventListener('resize', () => requestAnimationFrame(resizeCanvas));
 // ===================================================================
 // MAIN: loop, boot, live-update snapshot
 // ===================================================================
 
-let lastFrame = performance.now(), acc = 0, uiTimer = 0, rtime = 0;
+let lastFrame = performance.now(), acc = 0, uiTimer = 0, rtime = 0, saveTimer = 0;
 // Quality governor: lower detail when frames arrive late, restore it once
 // the frame's own work leaves plenty of headroom again.
 const perf = { gap: 16.7, work: 4, slow: 0, fast: 0 };
@@ -3927,39 +4066,24 @@ function frame(now) {
   }
   render(rtime);
   governQuality(gap, performance.now() - t0, dt);
+  // Autosave the battle every couple of seconds of real time.
+  if (G && !G.demo && !G.over) {
+    saveTimer += dt;
+    if (saveTimer >= 2) { saveTimer = 0; saveBattle(); }
+  }
   uiTimer -= dt;
   if (uiTimer <= 0) { uiTimer = 0.1; tickUI(); }
   requestAnimationFrame(frame);
 }
 
-// A battle in progress survives a page update: towers, gold and the wave reached.
+// A battle in progress survives a live page update, using the same save
+// format as closing and reopening the page.
 function snapshot() {
-  const game = G && !G.demo && !G.over ? {
-    mapId: G.map.id, diff: G.diffId, mode: G.mode, gold: G.gold, lives: G.lives, seen: G.seen,
-    wave: G.spawners.length || G.enemies.length ? Math.max(0, G.wave - 1) : G.wave,
-    towers: G.towers.map(t => ({ type: t.type, c: t.c, r: t.r, level: t.level, branch: t.branch, spent: t.spent, mode: t.mode, kills: t.kills, dealt: t.dealt })),
-    stats: G.stats,
-  } : null;
-  return { v: 1, ui: { mapId: UIState.mapId, diff: UIState.diff, mode: UIState.mode, speed: UIState.speed }, game };
+  return { v: 2, ui: { mapId: UIState.mapId, diff: UIState.diff, mode: UIState.mode }, battle: serializeBattle() };
 }
 function restore(data) {
-  const s = data && data.game;
-  if (!s || !MAPS.some(m => m.id === s.mapId)) return false;
-  startBattle(s.mapId, s.diff, s.mode);
-  G.gold = 1e9;
-  for (const o of s.towers) {
-    const t = buildTower(o.type, o.c, o.r);
-    if (!t) continue;
-    for (let i = 0; i < o.level; i++) upgradeTower(t);
-    if (o.branch >= 0) upgradeTower(t, o.branch);
-    Object.assign(t, { spent: o.spent, mode: o.mode, kills: o.kills, dealt: o.dealt, fresh: false, born: 1 });
-  }
-  Object.assign(G, { gold: s.gold, lives: s.lives, wave: s.wave, seen: s.seen || {}, stats: s.stats || G.stats });
-  G.particles.length = 0; G.fx.length = 0; G.texts.length = 0;
-  UIState.paused = true;
-  $('paused-tag').hidden = false;
-  $('toast').hidden = true;
-  return true;
+  const s = data && data.battle;
+  return validBattle(s) ? resumeBattle(s) : false;
 }
 
 function start(data) {
@@ -3970,7 +4094,6 @@ function start(data) {
   syncToggles();
   resizeCanvas();
   if (!restore(data)) toTitle();
-  if (data && data.ui && data.ui.speed) setSpeed(data.ui.speed);
   requestAnimationFrame(t => { lastFrame = t; frame(t); });
 }
 
@@ -3981,7 +4104,7 @@ else start(window.claude?.hot?.data ?? {});
 // Test hook used by automated balance runs; harmless in play.
 window.__LK = {
   get G() { return G; }, newGame, buildTower, upgradeTower, sellTower, canBuild, startNextWave, update, castSpell,
-  TOWERS, ENEMIES, MAPS, makeWave, getWave, UIState, startBattle, Hooks, hpScale, spawnEnemy,
+  TOWERS, ENEMIES, MAPS, makeWave, getWave, UIState, startBattle, Hooks, hpScale, spawnEnemy, serializeBattle, restoreBattle,
   get quality() { return QUALITY; },
 };
 </script>

@@ -2,7 +2,7 @@
 // MAIN: loop, boot, live-update snapshot
 // ===================================================================
 
-let lastFrame = performance.now(), acc = 0, uiTimer = 0, rtime = 0;
+let lastFrame = performance.now(), acc = 0, uiTimer = 0, rtime = 0, saveTimer = 0;
 // Quality governor: lower detail when frames arrive late, restore it once
 // the frame's own work leaves plenty of headroom again.
 const perf = { gap: 16.7, work: 4, slow: 0, fast: 0 };
@@ -31,39 +31,24 @@ function frame(now) {
   }
   render(rtime);
   governQuality(gap, performance.now() - t0, dt);
+  // Autosave the battle every couple of seconds of real time.
+  if (G && !G.demo && !G.over) {
+    saveTimer += dt;
+    if (saveTimer >= 2) { saveTimer = 0; saveBattle(); }
+  }
   uiTimer -= dt;
   if (uiTimer <= 0) { uiTimer = 0.1; tickUI(); }
   requestAnimationFrame(frame);
 }
 
-// A battle in progress survives a page update: towers, gold and the wave reached.
+// A battle in progress survives a live page update, using the same save
+// format as closing and reopening the page.
 function snapshot() {
-  const game = G && !G.demo && !G.over ? {
-    mapId: G.map.id, diff: G.diffId, mode: G.mode, gold: G.gold, lives: G.lives, seen: G.seen,
-    wave: G.spawners.length || G.enemies.length ? Math.max(0, G.wave - 1) : G.wave,
-    towers: G.towers.map(t => ({ type: t.type, c: t.c, r: t.r, level: t.level, branch: t.branch, spent: t.spent, mode: t.mode, kills: t.kills, dealt: t.dealt })),
-    stats: G.stats,
-  } : null;
-  return { v: 1, ui: { mapId: UIState.mapId, diff: UIState.diff, mode: UIState.mode, speed: UIState.speed }, game };
+  return { v: 2, ui: { mapId: UIState.mapId, diff: UIState.diff, mode: UIState.mode }, battle: serializeBattle() };
 }
 function restore(data) {
-  const s = data && data.game;
-  if (!s || !MAPS.some(m => m.id === s.mapId)) return false;
-  startBattle(s.mapId, s.diff, s.mode);
-  G.gold = 1e9;
-  for (const o of s.towers) {
-    const t = buildTower(o.type, o.c, o.r);
-    if (!t) continue;
-    for (let i = 0; i < o.level; i++) upgradeTower(t);
-    if (o.branch >= 0) upgradeTower(t, o.branch);
-    Object.assign(t, { spent: o.spent, mode: o.mode, kills: o.kills, dealt: o.dealt, fresh: false, born: 1 });
-  }
-  Object.assign(G, { gold: s.gold, lives: s.lives, wave: s.wave, seen: s.seen || {}, stats: s.stats || G.stats });
-  G.particles.length = 0; G.fx.length = 0; G.texts.length = 0;
-  UIState.paused = true;
-  $('paused-tag').hidden = false;
-  $('toast').hidden = true;
-  return true;
+  const s = data && data.battle;
+  return validBattle(s) ? resumeBattle(s) : false;
 }
 
 function start(data) {
@@ -74,7 +59,6 @@ function start(data) {
   syncToggles();
   resizeCanvas();
   if (!restore(data)) toTitle();
-  if (data && data.ui && data.ui.speed) setSpeed(data.ui.speed);
   requestAnimationFrame(t => { lastFrame = t; frame(t); });
 }
 
@@ -85,6 +69,6 @@ else start(window.claude?.hot?.data ?? {});
 // Test hook used by automated balance runs; harmless in play.
 window.__LK = {
   get G() { return G; }, newGame, buildTower, upgradeTower, sellTower, canBuild, startNextWave, update, castSpell,
-  TOWERS, ENEMIES, MAPS, makeWave, getWave, UIState, startBattle, Hooks, hpScale, spawnEnemy,
+  TOWERS, ENEMIES, MAPS, makeWave, getWave, UIState, startBattle, Hooks, hpScale, spawnEnemy, serializeBattle, restoreBattle,
   get quality() { return QUALITY; },
 };
